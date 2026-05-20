@@ -20,7 +20,7 @@ SMTP_PORT = 587
 EMAIL_ADDRESS = "naveenna242@gmail.com"
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
-
+#SENDING EMAILS
 def send_email(receiver, subject, body):
     msg = MIMEText(body)
     msg["Subject"] = subject
