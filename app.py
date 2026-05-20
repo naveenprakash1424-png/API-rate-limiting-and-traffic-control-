@@ -6,7 +6,7 @@ import smtplib
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
-import time
+import time, os
 app = Flask(__name__)
 app.secret_key = "secret123"
 
@@ -18,7 +18,7 @@ REFILL_RATE = 3
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 EMAIL_ADDRESS = "naveenna242@gmail.com"
-EMAIL_PASSWORD = "ugtb lbmv gark rmda"
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
 
 def send_email(receiver, subject, body):
