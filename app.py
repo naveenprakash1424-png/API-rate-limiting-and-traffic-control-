@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, flash
 import redis
 import threading
 import secrets
@@ -6,9 +6,11 @@ import smtplib
 from email.mime.text import MIMEText
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
-import time, os
+import time, os 
+
 app = Flask(__name__)
-app.secret_key = "secret123"
+
+app.secret_key = "secretkey123##"
 
 r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
@@ -20,7 +22,6 @@ SMTP_PORT = 587
 EMAIL_ADDRESS = "naveenna242@gmail.com"
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
-#SENDING EMAILS
 def send_email(receiver, subject, body):
     msg = MIMEText(body)
     msg["Subject"] = subject
@@ -62,6 +63,23 @@ def signup():
         )
 
         flash("Signup successful")
+        threading.Thread(
+    target=send_email,
+    args=(
+        email,
+        "Signup Successful!",
+        f"""
+Welcome {username}
+
+Your account has been created successfully.
+
+Email: {email}
+Signup Time: {datetime.now()}
+
+Thank you.
+"""
+    )
+).start()
         return redirect("/login")
 
     return render_template("signup.html")
@@ -111,11 +129,8 @@ def login():
 
         flash("Login successful")
 
-        send_email(
-            email,
-            "Login Successful!",
-            f"You are currently logged in successfully at {datetime.now()}"
-        )
+        threading.Thread(target=send_email,
+        args=(email,"Login Successful!", f"You are currently logged in successfully at {datetime.now()}")).start()
 
         return f"Welcome {user['username']}"
 
@@ -216,4 +231,4 @@ def token_bucket():
 
     r.expire(key, 120)
 if __name__ == "__main__":
-    app.run(debug=True, threaded=True)
+    app.run(debug=True)
