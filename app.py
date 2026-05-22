@@ -15,15 +15,19 @@ app.secret_key = "secretkey123##"
 
 r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
-MAX_TOKENS = 3
-REFILL_RATE = 3
+WINDOW = 60
+FIXED_LIMIT = 100
+
+MAX_TOKENS = 10
+REFILL_RATE = 1  
+
+BLOCK_TIME = 60 * 60 * 24 
 
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 EMAIL_ADDRESS = "naveenna242@gmail.com"
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
-BLOCK_TIME = 60 * 60 * 24 
 
 def send_email(receiver, subject, body):
     msg = MIMEText(body)
@@ -86,8 +90,6 @@ Thank you.
 
     return render_template("signup.html")
 
-LIMIT = 5
-WINDOW = 300   
 
 
 @app.route("/login", methods=["GET", "POST"])
