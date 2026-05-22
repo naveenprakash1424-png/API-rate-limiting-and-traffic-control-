@@ -1,9 +1,10 @@
-from flask import Flask, render_template, request, redirect, flash
+from flask import Flask, render_template, request, redirect, flash, abort
 import redis
 import threading
 import secrets
 import smtplib
 from email.mime.text import MIMEText
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 import time, os 
@@ -22,6 +23,8 @@ SMTP_PORT = 587
 EMAIL_ADDRESS = "naveenna242@gmail.com"
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
+BLOCK_TIME = 60 * 60 * 24 
+
 def send_email(receiver, subject, body):
     msg = MIMEText(body)
     msg["Subject"] = subject
@@ -33,16 +36,15 @@ def send_email(receiver, subject, body):
         server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
         server.send_message(msg)
 
-
 @app.route("/")
 def home():
     return redirect("/login")
 
-
-# ---------------- SIGNUP ----------------
+# SIGNUP 
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
+        # data = request.get_json()
         username = request.form["username"]
         email = request.form["email"]
         password = request.form["password"]
@@ -84,15 +86,14 @@ Thank you.
 
     return render_template("signup.html")
 
-
-# ---------------- LOGIN ----------------
 LIMIT = 5
-WINDOW = 300   # 5 minutes
+WINDOW = 300   
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
+        
         email = request.form["email"]
         password = request.form["password"]
 
@@ -104,14 +105,12 @@ def login():
             flash("User not found")
             return redirect("/login")
 
-        # Check failed attempts
         attempts = r.get(fail_key)
 
         if attempts and int(attempts) >= LIMIT:
             flash("Too many wrong password attempts. Try again after 5 minutes")
             return redirect("/login")
 
-        # Wrong password
         if not check_password_hash(user["password"], password):
 
             count = r.incr(fail_key)
@@ -124,7 +123,6 @@ def login():
             flash(f"Wrong password. Remaining attempts: {remaining}")
             return redirect("/login")
 
-        # Successful login → reset fail count
         r.delete(fail_key)
 
         flash("Login successful")
@@ -137,7 +135,7 @@ def login():
     return render_template("login.html")
 
 
-# ---------------- FORGOT PASSWORD ----------------
+#   FORGOT PASSWORD 
 @app.route("/forgot", methods=["GET", "POST"])
 def forgot():
     if request.method == "POST":
@@ -146,8 +144,8 @@ def forgot():
         user = r.hgetall(f"user:{email}")
 
         if not user:
-            flash("Email not found! Please Signup")
-            return redirect("/signup")
+            flash("Email not found! Please Enter correct Email...!")
+            return redirect("/forgot")
 
         token = secrets.token_urlsafe(32)
         r.setex(f"reset:{token}", 600, email)
@@ -167,13 +165,13 @@ Expires in 10 minutes.
             args=(email, "Reset Password", body)
         ).start()
 
-        flash("Reset email sent")
+        flash("Reset email sent..check You Inbox..!")
         return redirect("/login")
 
     return render_template("forgot.html")
 
 
-# ---------------- RESET ----------------
+#  RESET 
 @app.route("/reset/<token>", methods=["GET", "POST"])
 def reset(token):
     email = r.get(f"reset:{token}")
@@ -198,37 +196,102 @@ def reset(token):
     return render_template("reset.html")
 
 
-@app.before_request
-def token_bucket():
-    ip = request.remote_addr
-    key = f"bucket:{ip}"
 
-    data = r.hgetall(key)
+
+@app.before_request
+def rate_limiter():
+
+    ip = request.remote_addr
     now = time.time()
+
+    if r.get(f"blocked:{ip}"):
+        abort(403)
+
+    window_id = int(now) // WINDOW
+    window_key = f"fw:{ip}:{window_id}"
+
+    current = r.incr(window_key)
+
+    if current == 1:
+        r.expire(window_key, WINDOW)
+
+    if current > FIXED_LIMIT:
+        r.set(f"blocked:{ip}", "1", ex=BLOCK_TIME)
+        abort(429)
+
+    # =====================
+    # 3. TOKEN BUCKET (SMOOTH CONTROL)
+    # =====================
+    bucket_key = f"tb:{ip}"
+
+    data = r.hgetall(bucket_key)
 
     if not data:
         tokens = MAX_TOKENS
         last_refill = now
     else:
-        tokens = float(data["tokens"])
-        last_refill = float(data["last_refill"])
+        tokens = float(data.get("tokens", MAX_TOKENS))
+        last_refill = float(data.get("last_refill", now))
 
-    # refill tokens
     elapsed = now - last_refill
-    refill = elapsed * REFILL_RATE
-    tokens = min(MAX_TOKENS, tokens + refill)
+    tokens = min(MAX_TOKENS, tokens + elapsed * REFILL_RATE)
 
     if tokens < 1:
-        return "Too many requests. Try later.", 429
+        abort(429)
 
-    # consume token
     tokens -= 1
 
-    r.hset(key, mapping={
+    r.hset(bucket_key, mapping={
         "tokens": tokens,
         "last_refill": now
     })
+#Error Handling
 
-    r.expire(key, 120)
+@app.errorhandler(429)
+def too_many_requests(error):
+    return render_template(
+        "error.html",
+        code=429,
+        message="Too many requests. Please try again later."
+    ), 429
+
+
+@app.errorhandler(404)
+def not_found(error):
+    return render_template(
+        "error.html",
+        code=404,
+        message="Page not found."
+    ), 404
+
+
+@app.errorhandler(500)
+def server_error(error):
+    return render_template(
+        "error.html",
+        code=500,
+        message="Internal server error."
+    ), 500
+
+
+@app.errorhandler(403)
+def forbidden(error):
+    return render_template(
+        "error.html",
+        code=403,
+        message="Access denied."
+    ), 403
+
+
+@app.errorhandler(Exception)
+def handle_exception(error):
+    if isinstance(error, HTTPException):
+        return error
+    return render_template(
+        "error.html",
+        code=500,
+        message=str(error)
+    ), 500
+
 if __name__ == "__main__":
     app.run(debug=True)
